@@ -117,21 +117,22 @@ df2 <- subset(df2,Reproduction < 8)
 
 ### Create a new column with the reproductive as a binary variable
 
-df3 <- df2 %>%
+df4 <- df2 %>%
   mutate(RS = if_else(Reproduction == 5, 1, 0))
 
-### Group by year and ID
-df4 <- df3 %>%
-  group_by(ID, Year) %>%  # Grouper par ID et année
-  summarise( 
-    age = first(Age),
-    density = first(density),
-    RS = first(RS),
-    sex = first(Lamb_Sex),
-    hlg = max(hlg),
-    wtd12 = first(wtd12),
-    wtd114 = first(wtd114)
-  )
+# ### Group by year and ID
+# df4 <- df3 %>%
+#   group_by(ID, Year) %>%  # Grouper par ID et année
+#   summarise( 
+#     age = first(Age),
+#     density = first(density),
+#     RS = first(RS),
+#     sex = first(Lamb_Sex),
+#     hlg = max(hlg),
+#     wtd12 = first(wtd12),
+#     wtd114 = first(wtd114),
+#     
+#   )
 
 # Left join EBV
 
@@ -142,23 +143,23 @@ df5 <- df4 %>%
   left_join(EBV,by = "ID")
 
 for(i in 1:nrow(df5)){
-  df5[i,"mu"] <- mean(as.numeric(df5[i,9:(ncol(df5)-2)]))
-  df5[i,"sd"] <- sd(as.numeric(df5[i,9:(ncol(df5)-2)]))
+  df5[i,"mu"] <- mean(as.numeric(df5[i,25:(ncol(df5)-2)]))
+  df5[i,"sd"] <- sd(as.numeric(df5[i,25:(ncol(df5)-2)]))
 }
 
 df5 <- df5 %>% select(-starts_with("V"))
 
 # adding cohort
-df5[,"cohort"] <- df5[,"Year"] - df5["age"]
+df5[,"cohort"] <- df5[,"Year"] - df5["Age"]
 
 # Create age classes based on fixed cutoffs
-df5$age_class <- cut(df5$age,
-                     breaks = c(2, 3, 8, max(df5$age)),  # Define the break points
+df5$age_class <- cut(df5$Age,
+                     breaks = c(2, 3, 8, max(df5$Age)),  # Define the break points
                      labels = c("tite jeune", "madame","vielle madame"), 
                      right = FALSE)  # right = FALSE means the interval is left-closed
 # Scaling the data
 
-df5[,c("age_scaled","density_scaled","hlg_scaled","mu_scaled")] <- scale(df5[,c("age","density","hlg","mu")])
+df5[,c("age_scaled","density_scaled","hlg_scaled","mu_scaled")] <- scale(df5[,c("Age","density","hlg","mu")])
 
 
 # looking for error in the data base
@@ -168,7 +169,7 @@ ggplot(df5, aes(x = hlg)) +
   geom_histogram(binwidth = 0.5)
 
 # age
-ggplot(df5, aes(x = age)) +
+ggplot(df5, aes(x = Age)) +
   geom_histogram(binwidth = 0.5)
 
 # age_class
