@@ -141,7 +141,7 @@ Male.pop.young <- function(dt1,nsim=nsim,max.DeltaJ=6){
 
 # females   ######
 feMale.mixed <- function(dt1,nsim=nsim){
-  tmp <- subset(dt1, dt1$sex=="female" & dt1$age>1 & !is.na(pheno))
+  tmp <- subset(dt1, dt1$sex== 2 & dt1$age>1 & !is.na(pheno))
   l.id <- table(droplevels(tmp$ID))
   M <- lmer( pheno ~ JJ.sqrt + (1 + JJ.sqrt | ID), #+ (1 | yr),
              data = tmp[tmp$ID %in% names(l.id[l.id>1]),], na.action = na.omit,
