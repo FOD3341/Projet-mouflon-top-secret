@@ -141,9 +141,9 @@ Male.pop.young <- function(dt1,nsim=nsim,max.DeltaJ=6){
 
 # females   ######
 feMale.mixed <- function(dt1,nsim=nsim){
-  tmp <- subset(dt1, dt1$sex== 2 & dt1$age>1 & !is.na(pheno))
+  tmp <- subset(dt1, dt1$sex== "2" & dt1$age>1 & !is.na(pheno))
   l.id <- table(droplevels(tmp$ID))
-  M <- lmer( pheno ~ JJ.sqrt + (1 + JJ.sqrt | ID), #+ (1 | yr),
+  M <- lmer( pheno ~ JJ.sqrt  + (1 + JJ.sqrt | ID), #+ (1 | yr),
              data = tmp[tmp$ID %in% names(l.id[l.id>1]),], na.action = na.omit,
              control = lmerControl(optimizer="bobyqa", optCtrl = list(maxfun = 100000)))
   # Mz$males <- M
@@ -157,13 +157,13 @@ feMale.mixed <- function(dt1,nsim=nsim){
   mySumm3 <- function(.) {predict(.,newdata=newdat,type="response")}
   boo01 <- bootMer(M, mySumm3, nsim = nsim)
   # boo02 <- bootMer(M, mySumm, nsim = 100)
-  PM <- cbind(newdat,adjwt=boo01$t0,adjwtSE=apply(boo01$t,2,sd),method="mixed")
+  PM <- cbind(newdat,adjhlg=boo01$t0,adjhlgSE=apply(boo01$t,2,sd),method="mixed")
   return(PM[,-3])
 }
 
 # old female pop    same as male.yuong, but for female
 feMale.pop.old <- function(dt1,nsim=nsim,max.DeltaJ=6){
-  tmp <- subset(dt1, dt1$sex=="female" & dt1$age>=2 & !is.na(pheno))
+  tmp <- subset(dt1, dt1$sex=="2" & dt1$age>=2 & !is.na(pheno))
   tmp$ID <- droplevels(tmp$ID)
   l.id <- table(tmp$ID)
   l.fittable.age <- table(tmp$age,tmp$ID)
@@ -173,8 +173,8 @@ feMale.pop.old <- function(dt1,nsim=nsim,max.DeltaJ=6){
       lmt <- lm(pheno ~ JJ.sqrt,data = tmp[tmp$ID==i.id,], na.action = na.omit)
       pred <- predict(lmt,newdata = data.frame(JJ.sqrt=c(sqrt(jun5),sqrt(sept15))),se.fit = T)
       res <- data.frame(i.id,summary(lmt)$coefficients[2,1],summary(lmt)$coefficients[2,2],length(lmt$residuals),
-                        wt12=pred$fit[1],wt12.se=pred$se.fit[1],wt114=pred$fit[2],wt114.se=pred$se.fit[2])
-      names(res) <- c("id","Beta","SE","N","wt12","wt12.se","wt114","wt114.se")
+                        hlg12=pred$fit[1],hlg12.se=pred$se.fit[1],hlg114=pred$fit[2],hlg114.se=pred$se.fit[2])
+      names(res) <- c("id","Beta","SE","N","hlg12","hlg12.se","hlg114","hlg114.se")
       return(res)
     })
     # calculate mean individual growth
@@ -188,24 +188,24 @@ feMale.pop.old <- function(dt1,nsim=nsim,max.DeltaJ=6){
       if(bhat$SE==0){bhat$SE <- sd(lm$Beta)}
     }
     #   calculate adjusted pheno or extract from lm if present
-    age.res <- data.frame()#ID=NA,JJ=NA,n=NA,"age,"adjwt","adjwtSE",method="pop")
+    age.res <- data.frame()#ID=NA,JJ=NA,n=NA,"age,"adjhlg","adjhlgSE",method="pop")
     for(i.id in colnames(l.fittable.age)[l.fittable.age[rownames(l.fittable.age)==i.age,]>0]){
       if(l.fittable.age[as.character(i.age),i.id]>1){
         tmp.res <- data.frame(ID=i.id,JJ=c(12,114),n=l.fittable.age[as.character(i.age),i.id],age=i.age,
-                              adjwt= as.numeric(lm[lm$id==i.id,c("wt12","wt114")]),
-                              adjwtSE= as.numeric(lm[lm$id==i.id,c("wt12.se","wt114.se")] ),
+                              adjhlg= as.numeric(lm[lm$id==i.id,c("hlg12","hlg114")]),
+                              adjhlgSE= as.numeric(lm[lm$id==i.id,c("hlg12.se","hlg114.se")] ),
                               method="pop")
-        tmp.res$adjwt <- tmp.res$adjwt/as.numeric( laply(c(12,114),function(x)min(abs(x-tmp[tmp$ID==i.id,"JJ"])))<50)  # devides by 0 ( results in infinite) if measurement date is more than 50 days from adjustement date
-        tmp.res[is.infinite(tmp.res$adjwt),c("adjwt","adjwtSE")] <- NA
+        tmp.res$adjhlg <- tmp.res$adjhlg/as.numeric( laply(c(12,114),function(x)min(abs(x-tmp[tmp$ID==i.id,"JJ"])))<50)  # devides by 0 ( results in infinite) if measurement date is more than 50 days from adjustement date
+        tmp.res[is.infinite(tmp.res$adjhlg),c("adjhlg","adjhlgSE")] <- NA
         age.res <- rbind(age.res, tmp.res)
       }
       if(l.fittable.age[as.character(i.age),i.id]==1){
         DeltaJJ <- sqrt(c(12,114))-tmp[tmp$ID==i.id,"JJ.sqrt"]
         tmp.res <- data.frame(ID=i.id,JJ=c(12,114),n=l.fittable.age[as.character(i.age),i.id],age=i.age,
-                              adjwt= tmp[tmp$ID==i.id,"pheno"]+bhat$bhat*DeltaJJ,
-                              adjwtSE= abs(bhat$SE*DeltaJJ) ,method="pop"   )
-        tmp.res$adjwt <- tmp.res$adjwt/as.numeric( laply(c(12,114),function(x)min(abs(x-tmp[tmp$ID==i.id,"JJ"])))<max.DeltaJ)  # devides by 0 ( results in infinite) if measurement date is more than 50 days from adjustement date
-        tmp.res[is.infinite(tmp.res$adjwt),c("adjwt","adjwtSE")] <- NA
+                              adjhlg= tmp[tmp$ID==i.id,"pheno"]+bhat$bhat*DeltaJJ,
+                              adjhlgSE= abs(bhat$SE*DeltaJJ) ,method="pop"   )
+        tmp.res$adjhlg <- tmp.res$adjhlg/as.numeric( laply(c(12,114),function(x)min(abs(x-tmp[tmp$ID==i.id,"JJ"])))<max.DeltaJ)  # devides by 0 ( results in infinite) if measurement date is more than 50 days from adjustement date
+        tmp.res[is.infinite(tmp.res$adjhlg),c("adjhlg","adjhlgSE")] <- NA
         age.res <- rbind(age.res, tmp.res)
       }
     }
@@ -234,7 +234,7 @@ lb.mixed <- function(dt1,nsim=nsim){
   mySumm3 <- function(.) {predict(.,newdata=newdat,type="response")}
   boo01 <- bootMer(M, mySumm3, nsim = nsim)                                  # bootstrap prediction fonction
   # boo02 <- bootMer(M, mySumm, nsim = 100)
-  PM <- cbind(newdat,adjwt=boo01$t0,adjwtSE=apply(boo01$t,2,sd),method="mixed")   # extract predicted adjusted value and error
+  PM <- cbind(newdat,adjhlg=boo01$t0,adjwtSE=apply(boo01$t,2,sd),method="mixed")   # extract predicted adjusted value and error
   PM$age <- 0
   return(PM[,c(1,2,3,8,5:7,4)])                                                #  return reasults
 }
