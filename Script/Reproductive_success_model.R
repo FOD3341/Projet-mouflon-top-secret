@@ -121,29 +121,131 @@ ggplot(data, aes(x = factor(cohort), y = RS)) +
 prior <- c(
   prior(normal(-0.5, 0.5), class = "b", coef = "density"),
   prior(normal(0.5, 0.5), class = "b", coef = "age"),
-  prior(normal(-0.5, 0.5), class = "b", coef = "IageE2"),
+#  prior(normal(-0.5, 0.5), class = "b", coef = "IageE2"),
   prior(normal(0.5, 0.5), class = "b", coef = "hlg12"),
   prior(normal(0.5, 1), class = "b", coef = "age:hlg12"),
-  prior(normal(-0.5, 1), class = "b", coef = "IageE2:hlg12"),
+#  prior(normal(-0.5, 1), class = "b", coef = "IageE2:hlg12"),
   prior(normal(0, 1), class = "Intercept"),
   prior(normal(0, 1), class = "sd", group = "ID"),
   prior(normal(0, 1), class = "sd", group = "Year"),
   prior(normal(0, 1), class = "sd", group = "cohort")
 )
-
++ I(age^2)*hlg12 + I(age^2)
 model <- brm(
-  RS ~ density + age + I(age^2) + hlg12 + hlg12*age + I(age^2)*hlg12 + (1 |  Year) + (1 |  ID) + (1 |  cohort) ,
+  RS ~ density + age  + hlg12 + hlg12*age  + (1 |  Year) + (1 |  ID) + (1 |  cohort) ,
   data = data,
   family = bernoulli(link = "logit"),
   prior = prior,
   chains = 4,
   cores = 4,
-  iter = 20000,
-  warmup = 5000,
+  iter = 2000,
+  warmup = 1000,
   control = list(adapt_delta = 0.95, max_treedepth = 10),
   silent = 0,
   save_pars = save_pars(all = TRUE)
 )
+
+# Get posterior predictions
+conditions <- expand.grid(
+  age = 1:19, 
+  hlg12 = c(18, 22, 26),  # Trois valeurs fixes de hlg12
+  density = mean(data$density, na.rm = TRUE), # Une seule valeur moyenne de density
+  cohort = "new",
+  Year = "new",
+  ID = "new"
+)
+
+preds <- posterior_epred(model, newdata = conditions,allow_new_levels = TRUE)
+
+# Summarize predictions
+pred_summary <- apply(preds, 2, function(x) c(mean = mean(x), lower = quantile(x, 0.025), upper = quantile(x, 0.975)))
+pred_summary <- t(pred_summary)
+colnames(pred_summary) <- c("mean", "lower", "upper")
+
+
+#Convert predictions to a data frame and add row numbers
+pred_df <- pred_summary %>%
+  as.data.frame() %>%
+  mutate(Rownumber = row_number()) 
+
+# Add row numbers to conditions as well
+conditions <- conditions %>%
+  mutate(Rownumber = row_number()) 
+
+# Perform the left join using the Rownumber
+effect <- pred_df %>%
+  left_join(conditions, by = "Rownumber")
+
+plot(effect$age,effect$mean)
+
+
+#Creating horn class
+horn_class <- quantile(data$hlg12,na.rm = T)
+
+
+
+# Create age classes based on fixed cutoffs
+data <- data %>%
+  filter(!is.na(hlg12))
+
+data$hlg_class <- cut(data$hlg12,
+                     breaks = c(0, 18, 24,40),  # Define the break points
+                     labels = c("Petite cornes", "Moyenne cornes","Grosse cornes"), 
+                     right = FALSE)  # right = FALSE means the interval is left-closed
+
+effect <- as.data.frame(conditional_effects(model,"age:hlg12")[[1]])
+
+effect$hlg_class <- factor(effect$hlg12, 
+                           levels = c(17.5307079105918, 22.1390055802425, 26.7473032498933),
+                           labels = c("Petite cornes", "Moyenne cornes", "Grosse cornes"))
+# Assuming your data frame is called 'data' and contains columns 'RS', 'age', 'hlg12'
+
+prop <- data %>%
+  mutate(ntot = nrow(data)) %>%
+  group_by(age, hlg_class) %>%
+  mutate(proportion = n() / ntot) %>%
+  distinct(age,hlg_class,proportion)
+  
+
+
+P <- ggplot() +
+  geom_line(data = effect, aes(x = age, y = estimate__, colour = hlg_class)) +
+  geom_ribbon(data = effect, aes(x = age, ymin = lower__, ymax = upper__, fill = factor(hlg_class)), alpha = 0.3) +
+  labs(title = "Succès reproducteur en relation avec la taille des cornes et l'âge",
+       x = "Âge",
+       y = "Succès reproducteur") +
+  theme_minimal() +
+  scale_colour_manual(values = c("#66C2A5", "#FC8D62", "#8DA0CB"), 
+                      name = "Classe de cornes",  # Customizing the legend title
+                      labels = c("Petite cornes", "Moyenne cornes", "Grande cornes")) +
+  scale_fill_manual(values = c("#66C2A5", "#FC8D62", "#8DA0CB"), 
+                    name = "Classe de cornes",  # Customizing the legend title
+                    labels = c("Petite cornes", "Moyenne cornes", "Grande cornes"),
+                    guide = guide_legend(override.aes = list(fill = c("#66C2A5", "#FC8D62", "#8DA0CB")))) # Ensures the same legend for fill
+
+P + geom_bar(data = prop, aes(x = age, y = proportion, fill = factor(hlg_class)), 
+             stat = "identity", position = "stack", alpha = 0.5, show.legend = FALSE) +
+  scale_y_continuous(
+    sec.axis = sec_axis(~., name = "proportion d'observation")  # Secondary axis for proportion
+  ) +
+  scale_fill_manual(values = c("#66C2A5", "#FC8D62", "#8DA0CB"), 
+name = "Classe de cornes",  # Customizing the legend title
+labels = c("Petite cornes", "Moyenne cornes", "Grande cornes"),
+guide = guide_legend(override.aes = list(fill = c("#66C2A5", "#FC8D62", "#8DA0CB"))))
+
+  
+
+
+  
+  
+
+
+
+
+
+
+
+
 
 conditional_effects(model)
 pp_check(model)
