@@ -39,7 +39,8 @@ data <- data %>%
     age_scaled = first(age_scaled),
     density_scaled = first(density_scaled),
     mu_scaled = first(mu_scaled),
-    cohort = first(cohort)
+    cohort = first(cohort),
+    wtd12 = first(wtd12)
   )
 
 ### data visualization
@@ -429,19 +430,15 @@ mcmc_pairs(posterior_betas)
 
 
 
-
-
-
 # animal model
-
-data <- data %>%
-  left_join(Ped, by = "ID")
-
-library(nadiv)
-
 ped <- ped %>% rename(
   ID = Id,
 )
+
+data <- data %>%
+  left_join(ped, by = "ID")
+
+library(nadiv)
 
 ped <- ped[,c("ID","Dam","Sire")]
 
@@ -449,88 +446,60 @@ Ped <- prepPed(ped)
 
 Amat <- as.matrix(makeA(Ped))
 
-
-
-
-nonlinear_formula <- bf(
-  hlg12 ~ Linf * (1 - exp(-k * (age))),
-  Linf + k ~ 1 + (1 | gr(ID, cov = Amat)) + (1 | Dam) + (1 | cohort),
-  nl = TRUE
-)
-
-# Priors for the nonlinear parameters
+# Define the priors (you can adjust these based on prior knowledge)
 priors <- c(
-  prior(normal(25, 10), nlpar = "Linf"),  # Prior for Linf
-  prior(normal(0.1, 0.05), nlpar = "k"),  # Prior for k
-  prior(cauchy(0, 2), class = "sd")       # Prior for random effects
+  # Fixed Effects
+ # prior(normal(0, 10), class = "b"),  # Fixed effect coefficients
+  prior(student_t(3, 22.4, 4.7), class = "Intercept", resp = "hlg12"),  
+  prior(student_t(3, 52.2, 8.4), class = "Intercept", resp = "wtd12"),  
+  
+  # Random Effects
+  prior(student_t(3, 1, 4.7), class = "sd", group = "Dam", resp = "hlg12"),  
+  prior(student_t(3, 1, 8.4), class = "sd", group = "Dam", resp = "wtd12"),  
+  prior(student_t(3, 1, 4.7), class = "sd", group = "ID", resp = "hlg12"),  
+  prior(student_t(3, 1, 8.4), class = "sd", group = "ID", resp = "wtd12"),
+  prior(student_t(3, 1, 4.7), class = "sd", group = "cohort", resp = "hlg12"),  
+  prior(student_t(3, 1, 8.4), class = "sd", group = "cohort", resp = "wtd12"),
+  
+  # Splines
+  prior(student_t(3, 10, 4.7), class = "sds", coef = "s(age)", resp = "hlg12"),  
+  prior(student_t(3, 10, 8.4), class = "sds", coef = "s(age)", resp = "wtd12"),  
+  
+  # Residual Variance
+  prior(student_t(3, 0, 4.7), class = "sigma", resp = "hlg12"),  
+  prior(student_t(3, 0, 8.4), class = "sigma", resp = "wtd12") 
+  
 )
+ 
+bf_wtd <- bf(wtd12 ~  1 + s(age) + (1 | a | gr(ID, cov = Amat)) + (1 | b |  Dam) + (1 | c | cohort))
+bf_hlg <- bf(hlg12 ~  1 + s(age) + (1 | a | gr(ID, cov = Amat)) + (1 | b | Dam) + (1 | c| cohort))
 
-brm_hlg <- brm(nonlinear_formula,
-               data = data, data2 = list(Amat = Amat), family = gaussian(),
-               chains = 4, cores = 4, iter = 4000, warmup = 1000)
-
-summary(brm_hlg)
-
-
-
-prior1 <- c(
-  prior(normal(-0.5, 0.5), class = "b", coef = "density"),
-  prior(normal(0.5, 0.5), class = "b", coef = "age"),
-  prior(normal(0.5, 0.5), class = "b", coef = "hlg12"),
-  prior(normal(0.5, 1), class = "b", coef = "age:hlg12"),
-  prior(normal(0, 1), class = "Intercept"),
-  prior(normal(0, 1), class = "sd", group = "ID"),
-  prior(normal(0, 1), class = "sd", group = "Year"),
-  prior(normal(0, 1), class = "sd", group = "cohort")
-)
 model1 <- brm(
-  RS ~ 1 + (1 | gr(ID, cov = Amat)) +  (1 |  Year) + (1 |  ID) + (1 |  cohort) ,
+  bf_wtd + bf_hlg + set_rescor(TRUE),
   data = data,
-  data2 = Amat,
-  family = bernoulli(link = "logit"),
-  prior = prior,
-  chains = 4,
-  cores = 4,
-  iter = 2000,
-  warmup = 1000,
-  control = list(adapt_delta = 0.95, max_treedepth = 10),
-  silent = 0,
-  save_pars = save_pars(all = TRUE)
+  family = gaussian(),
+  prior = priors,
+  data2 = list(Amat = Amat),
+  chains = 4, cores = 4, iter = 500, warmup = 100,
+  control = list(adapt_delta = 0.95, max_treedepth = 15),
 )
 
+summary(model1)
 
+v_animal <- (VarCorr(model1, summary = FALSE)$ID$sd)^2
+v_Dam <- (VarCorr(model1, summary = FALSE)$Dam$sd)^2
+v_cohort <-  (VarCorr(model1, summary = FALSE)$cohort$sd)^2
+v_r <- (VarCorr(model1, summary = FALSE)$residual$sd)^2
 
-multi_formula <- bf(
-  hlg12 ~ Linf * (1 - exp(-k * (age))),
-  Linf + k ~ 1 + (1 | gr(ID, cov = Amat)) + (1 | Dam) + (1 | cohort),
-  nl = TRUE
-) + 
-  bf(
-    RS ~ 1 + hlg12 + (1 | gr(ID, cov = Amat)) + (1 | Year) + (1 | cohort),
-    family = bernoulli()
-  )
+h2_hlg <- as.mcmc(v_animal[, "hlg12_Intercept"] / (v_animal[,"hlg12_Intercept"] + v_Dam[,"hlg12_Intercept"] + v_cohort[,"hlg12_Intercept"] +  v_r[,"hlg12"]))
+h2_mass <- as.mcmc(v_animal[, "wtd12_Intercept"] / (v_animal[, "wtd12_Intercept"] + v_Dam[, "wtd12_Intercept"] + v_cohort[, "wtd12_Intercept"] + v_r[, "wtd12"]))
 
-priors <- c(
-  prior(normal(25, 10), nlpar = "Linf"),  # Growth parameter prior
-  prior(normal(0.1, 0.05), nlpar = "k"),  # Growth rate prior
-  prior(cauchy(0, 2), class = "sd"),      # Random effect priors
-  prior(normal(-0.5, 0.5), class = "b", coef = "hlg12"),  # Effect of horn length on RS
-  prior(normal(0, 1), class = "Intercept")
-)
+plot(h2_hlg)
+plot(h2_mass)
 
-# Fit the multivariate animal model
-brm_multi <- brm(
-  multi_formula,
-  data = data, 
-  data2 = list(Amat = Amat), 
-  chains = 4, 
-  cores = 4, 
-  iter = 100000, 
-  warmup = 20000,
-  control = list(adapt_delta = 0.95, max_treedepth = 12)
-)
+summary(h2_hlg)
+summary(h2_mass)
 
-summary(brm_multi)
+cor_g <- as.mcmc((VarCorr(model1, summary = FALSE)$ID$cor[, 1, 2]))
 
-
-
+plot(cor_g)
