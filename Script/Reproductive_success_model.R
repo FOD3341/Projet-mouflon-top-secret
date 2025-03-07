@@ -14,7 +14,7 @@ if (!require("hrbrthemes")) install.packages("hrbrthemes")
 
 data <- read.csv("Cleaned_data/cleaned_data.csv", header = T, sep = ",")
 horn_data <- read.csv("Cleaned_data/adjhlg.csv", header = T, sep = ",")
-
+ped <- read.csv("raw_data/Ram_Pedigree_W_Parents_Age.csv",header =T, sep =";")
 # rename columns for merge
 data <- data %>%
   rename(age = Age)
@@ -360,7 +360,7 @@ plot(model4)
 
 # model 5 bv et hlg
 
-ggplot(data, aes(x = EBV, y = hlg)) +
+ggplot(data, aes(x = EBV, y = hlg12)) +
   geom_smooth(method = "lm") +
   geom_point() +
   labs(title = "cor btw EBV et hlg",
@@ -374,13 +374,13 @@ cor(data$EBV,data$hlg12,use = "complete.obs")
 prior5 <- c(
   prior(normal(-0.5, 0.5), class = "b", coef = "density"),
   prior(normal(0.5, 0.5), class = "b", coef = "age"),
-  prior(normal(0.5, 0.5), class = "b", coef = "IageE2"),
+#  prior(normal(0.5, 0.5), class = "b", coef = "IageE2"),
   prior(normal(0.5, 0.5), class = "b", coef = "hlg12"),
   prior(normal(0.5, 0.5), class = "b", coef = "EBV"),
-  prior(normal(0.5, 1), class = "b", coef = "age:EBV"),
-  prior(normal(-0.5, 1), class = "b", coef = "IageE2:EBV"),
-  prior(normal(0.5, 1), class = "b", coef = "age:hlg12"),
-  prior(normal(-0.5, 1), class = "b", coef = "IageE2:hlg12"),
+# prior(normal(0.5, 1), class = "b", coef = "age:EBV"),
+#  prior(normal(-0.5, 1), class = "b", coef = "IageE2:EBV"),
+#  prior(normal(0.5, 1), class = "b", coef = "age:hlg12"),
+#  prior(normal(-0.5, 1), class = "b", coef = "IageE2:hlg12"),
   prior(normal(0, 1), class = "Intercept"),
   prior(normal(0, 1), class = "sd", group = "ID"),
   prior(normal(0, 1), class = "sd", group = "Year"),
@@ -388,7 +388,7 @@ prior5 <- c(
 )
 
 model5 <- brm(
-  RS ~ density  + age + I(age^2) + EBV + hlg12 + age*EBV + I(age^2)*EBV + age*hlg12 + I(age^2)*hlg12 + (1 |  Year) + (1 |  ID) + (1 |  cohort),
+  RS ~ density  + age + EBV + hlg12 + (1 |  Year) + (1 |  ID) + (1 |  cohort),
   data = data,
   family = bernoulli(link = "logit"),
   prior = prior5,
@@ -426,3 +426,111 @@ library(bayesplot)
 
 # Posterior scatter plot with correlation
 mcmc_pairs(posterior_betas)
+
+
+
+
+
+
+# animal model
+
+data <- data %>%
+  left_join(Ped, by = "ID")
+
+library(nadiv)
+
+ped <- ped %>% rename(
+  ID = Id,
+)
+
+ped <- ped[,c("ID","Dam","Sire")]
+
+Ped <- prepPed(ped)
+
+Amat <- as.matrix(makeA(Ped))
+
+
+
+
+nonlinear_formula <- bf(
+  hlg12 ~ Linf * (1 - exp(-k * (age))),
+  Linf + k ~ 1 + (1 | gr(ID, cov = Amat)) + (1 | Dam) + (1 | cohort),
+  nl = TRUE
+)
+
+# Priors for the nonlinear parameters
+priors <- c(
+  prior(normal(25, 10), nlpar = "Linf"),  # Prior for Linf
+  prior(normal(0.1, 0.05), nlpar = "k"),  # Prior for k
+  prior(cauchy(0, 2), class = "sd")       # Prior for random effects
+)
+
+brm_hlg <- brm(nonlinear_formula,
+               data = data, data2 = list(Amat = Amat), family = gaussian(),
+               chains = 4, cores = 4, iter = 4000, warmup = 1000)
+
+summary(brm_hlg)
+
+
+
+prior1 <- c(
+  prior(normal(-0.5, 0.5), class = "b", coef = "density"),
+  prior(normal(0.5, 0.5), class = "b", coef = "age"),
+  prior(normal(0.5, 0.5), class = "b", coef = "hlg12"),
+  prior(normal(0.5, 1), class = "b", coef = "age:hlg12"),
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "sd", group = "ID"),
+  prior(normal(0, 1), class = "sd", group = "Year"),
+  prior(normal(0, 1), class = "sd", group = "cohort")
+)
+model1 <- brm(
+  RS ~ 1 + (1 | gr(ID, cov = Amat)) +  (1 |  Year) + (1 |  ID) + (1 |  cohort) ,
+  data = data,
+  data2 = Amat,
+  family = bernoulli(link = "logit"),
+  prior = prior,
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  control = list(adapt_delta = 0.95, max_treedepth = 10),
+  silent = 0,
+  save_pars = save_pars(all = TRUE)
+)
+
+
+
+multi_formula <- bf(
+  hlg12 ~ Linf * (1 - exp(-k * (age))),
+  Linf + k ~ 1 + (1 | gr(ID, cov = Amat)) + (1 | Dam) + (1 | cohort),
+  nl = TRUE
+) + 
+  bf(
+    RS ~ 1 + hlg12 + (1 | gr(ID, cov = Amat)) + (1 | Year) + (1 | cohort),
+    family = bernoulli()
+  )
+
+priors <- c(
+  prior(normal(25, 10), nlpar = "Linf"),  # Growth parameter prior
+  prior(normal(0.1, 0.05), nlpar = "k"),  # Growth rate prior
+  prior(cauchy(0, 2), class = "sd"),      # Random effect priors
+  prior(normal(-0.5, 0.5), class = "b", coef = "hlg12"),  # Effect of horn length on RS
+  prior(normal(0, 1), class = "Intercept")
+)
+
+# Fit the multivariate animal model
+brm_multi <- brm(
+  multi_formula,
+  data = data, 
+  data2 = list(Amat = Amat), 
+  chains = 4, 
+  cores = 4, 
+  iter = 100000, 
+  warmup = 20000,
+  control = list(adapt_delta = 0.95, max_treedepth = 12)
+)
+
+summary(brm_multi)
+
+
+
