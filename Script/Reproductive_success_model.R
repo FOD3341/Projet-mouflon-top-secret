@@ -15,6 +15,8 @@ if (!require("hrbrthemes")) install.packages("hrbrthemes")
 data <- read.csv("Cleaned_data/cleaned_data.csv", header = T, sep = ",")
 horn_data <- read.csv("Cleaned_data/adjhlg.csv", header = T, sep = ",")
 ped <- read.csv("raw_data/Ram_Pedigree_W_Parents_Age.csv",header =T, sep =";")
+LRS <- read.csv("raw_data/RamMtn_LifetimeReproSuccess.csv",header =T, sep =";")
+
 # rename columns for merge
 data <- data %>%
   rename(age = Age)
@@ -396,7 +398,7 @@ model5 <- brm(
   chains = 4,
   cores = 4,
   iter = 10000,
-  warmup = 1000,
+  warmup = 2000,
   control = list(adapt_delta = 0.95, max_treedepth = 10),
   silent = 0,
   save_pars = save_pars(all = TRUE)
@@ -438,61 +440,164 @@ ped <- ped %>% rename(
 data <- data %>%
   left_join(ped, by = "ID")
 
+data <- data %>%
+  mutate(animal = ID)
+
 library(nadiv)
 
 ped <- ped[,c("ID","Dam","Sire")]
 
+ped <- ped %>%
+  rename(animal = ID)
+  
+  
 Ped <- prepPed(ped)
 
 Amat <- as.matrix(makeA(Ped))
 
-# Define the priors (you can adjust these based on prior knowledge)
-priors <- c(
-  # Fixed Effects
- # prior(normal(0, 10), class = "b"),  # Fixed effect coefficients
-  prior(student_t(3, 22.4, 4.7), class = "Intercept", resp = "hlg12"),  
-  prior(student_t(3, 52.2, 8.4), class = "Intercept", resp = "wtd12"),  
+data$age_class <-  factor(data$age_class,levels = c("tite jeune", "madame", "vielle madame"))
+
+### adding LRS
+
+data <- data %>%
+  left_join(LRS %>% select(ID, LRS.wean),by = "ID")
+
+
+
+bf_wtd <- bf(wt ~  1 + age_class*sq.date + (1 | a | gr(animal, cov = Amat)) + (1 | b |  Dam) + (1 | c | cohort) + (1 | d | ID) )
+bf_hlg <- bf(hlg ~ 1 + age_class*sq.date + (1 | a | gr(animal, cov = Amat)) + (1 | b |  Dam) + (1 | c | cohort) + (1 | d | ID) )
+bf_LRS <- bf(LRS.wean ~ 1 + (1 | a | gr(animal, cov = Amat)) + (1 | b |  Dam) + (1 | c | cohort) + (1 | d | ID) )
+
+
+
+Model_test <- brm(
+  bf_wtd,
+  data = data,
+  family = gaussian,
+  prior = c(
+    # Fixed Effects
+    # prior(normal(0, 10), class = "b"),  # Fixed effect coefficients
+    prior(student_t(3, 52.2, 8.4), class = "Intercept"),
   
-  # Random Effects
-  prior(student_t(3, 1, 4.7), class = "sd", group = "Dam", resp = "hlg12"),  
-  prior(student_t(3, 1, 8.4), class = "sd", group = "Dam", resp = "wtd12"),  
-  prior(student_t(3, 1, 4.7), class = "sd", group = "ID", resp = "hlg12"),  
-  prior(student_t(3, 1, 8.4), class = "sd", group = "ID", resp = "wtd12"),
-  prior(student_t(3, 1, 4.7), class = "sd", group = "cohort", resp = "hlg12"),  
-  prior(student_t(3, 1, 8.4), class = "sd", group = "cohort", resp = "wtd12"),
-  
-  # Splines
-  prior(student_t(3, 10, 4.7), class = "sds", coef = "s(age)", resp = "hlg12"),  
-  prior(student_t(3, 10, 8.4), class = "sds", coef = "s(age)", resp = "wtd12"),  
-  
-  # Residual Variance
-  prior(student_t(3, 0, 4.7), class = "sigma", resp = "hlg12"),  
-  prior(student_t(3, 0, 8.4), class = "sigma", resp = "wtd12") 
-  
+    # coefficients for age class and julian days
+    prior(student_t(3, 10, 8.4), class = "b", coef = "age_classviellemadame"),
+    prior(student_t(3, 10, 8.4), class = "b", coef = "age_classmadame"),
+    prior(student_t(3, 10, 8.4), class = "b", coef = "sq.date"),
+
+    # interaction
+    prior(student_t(3, 10, 8.4), class = "b", coef = "age_classmadame:sq.date"),
+    prior(student_t(3, 10, 8.4), class = "b", coef = "age_classviellemadame:sq.date"),
+
+    # Random Effects
+    prior(student_t(3, 1, 8.4), class = "sd", group = "Dam"),  
+    prior(student_t(3, 1, 8.4), class = "sd", group = "ID"),
+    prior(student_t(3, 1, 8.4), class = "sd", group = "cohort"),
+    prior(student_t(3, 1, 8.4), class = "sd", group = "animal"),
+    
+    # Residual Variance
+    prior(student_t(3, 0, 8.4), class = "sigma")
+),
+data2 = list(Amat = Amat),
+chains = 4, cores = 4, iter = 2000, warmup = 500,
+control = list(adapt_delta = 0.95, max_treedepth = 15),
 )
- 
-bf_wtd <- bf(wtd12 ~  1 + s(age) + (1 | a | gr(ID, cov = Amat)) + (1 | b |  Dam) + (1 | c | cohort))
-bf_hlg <- bf(hlg12 ~  1 + s(age) + (1 | a | gr(ID, cov = Amat)) + (1 | b | Dam) + (1 | c| cohort))
+
+plot(Model_test)
+summary(Model_test)
+pp_check(Model_test)
+conditional_effects(Model_test)
+
+v_animal <- (VarCorr(Model_test, summary = FALSE)$animal$sd)^2
+v_Dam <- (VarCorr(Model_test, summary = FALSE)$Dam$sd)^2
+v_cohort <-  (VarCorr(Model_test, summary = FALSE)$cohort$sd)^2
+v_ID <-  (VarCorr(Model_test, summary = FALSE)$ID$sd)^2
+v_r <- (VarCorr(Model_test, summary = FALSE)$residual$sd)^2
+
+
+h2_mass <- as.mcmc(v_animal / (v_animal + v_Dam + v_cohort + v_r))
+
+plot(h2_mass)
+
+summary(h2_mass)
+
+
+
+
+hist(data$LRS.wean)
+
+
+
+
 
 model1 <- brm(
-  bf_wtd + bf_hlg + set_rescor(TRUE),
+  bf_wtd + bf_hlg + bf_LRS + set_rescor(TRUE),
   data = data,
-  family = gaussian(),
-  prior = priors,
+   family = gaussian(),
+  # priors_mv <- c(
+  #   # Fixed Effects for wt
+  #   prior(student_t(3, 61.3, 9.8), class = "Intercept", resp = "wt"),
+  #   prior(student_t(3, 10, 8.4), class = "b", coef = "age_classmadame", resp = "wt"),
+  #   prior(student_t(3, 10, 8.4), class = "b", coef = "age_classviellemadame", resp = "wt"),
+  #   prior(student_t(3, 10, 8.4), class = "b", coef = "sq.date", resp = "wt"),
+  #   prior(student_t(3, 10, 8.4), class = "b", coef = "age_classmadame:sq.date", resp = "wt"),
+  #   prior(student_t(3, 10, 8.4), class = "b", coef = "age_classviellemadame:sq.date", resp = "wt"),
+  #   
+  #   # Fixed Effects for hlg
+  #   prior(student_t(3, 23.2, 4.1), class = "Intercept", resp = "hlg"),
+  #   prior(student_t(3, 10, 8.4), class = "b", coef = "age_classmadame", resp = "hlg"),
+  #   prior(student_t(3, 10, 8.4), class = "b", coef = "age_classviellemadame", resp = "hlg"),
+  #   prior(student_t(3, 10, 8.4), class = "b", coef = "sq.date", resp = "hlg"),
+  #   prior(student_t(3, 10, 8.4), class = "b", coef = "age_classmadame:sq.date", resp = "hlg"),
+  #   prior(student_t(3, 10, 8.4), class = "b", coef = "age_classviellemadame:sq.date", resp = "hlg"),
+  #   
+  #   # Random Effects for both responses
+  #   prior(student_t(3, 0, 9.8), class = "sd", group = "animal", resp = "wt"),
+  #   prior(student_t(3, 0, 4.1), class = "sd", group = "animal", resp = "hlg"),
+  #   
+  #   prior(student_t(3, 0, 9.8), class = "sd", group = "cohort", resp = "wt"),
+  #   prior(student_t(3, 0, 4.1), class = "sd", group = "cohort", resp = "hlg"),
+  #   
+  #   prior(student_t(3, 0, 9.8), class = "sd", group = "Dam", resp = "wt"),
+  #   prior(student_t(3, 0, 4.1), class = "sd", group = "Dam", resp = "hlg"),
+  #   
+  #   prior(student_t(3, 0, 9.8), class = "sd", group = "ID", resp = "wt"),
+  #   prior(student_t(3, 0, 4.1), class = "sd", group = "ID", resp = "hlg"),
+  #   
+  #   # Residual Variance for Each Response
+  #   prior(student_t(3, 0, 9.8), class = "sigma", resp = "wt"),
+  #   prior(student_t(3, 0, 4.1), class = "sigma", resp = "hlg")
+  #   
+  # ),
   data2 = list(Amat = Amat),
-  chains = 4, cores = 4, iter = 500, warmup = 100,
+  chains = 4, cores = 4, iter = 2000, warmup = 500,
   control = list(adapt_delta = 0.95, max_treedepth = 15),
 )
 
+
+pp_check(model1,resp = "hlg")
+pp_check(model1,resp = "wt")
+pp_check(model1,resp = "LRS.wean")
+
+summary(model1)
+conditional_effects(model1)
+
+
+
+
+print(ggplot(data = data1, aes(x = cohort, y = LRS)) + geom_smooth(method = "loess") + geom_point())
+
+plot(data1$LRS ~ data1$cohort)
+
 summary(model1)
 
-v_animal <- (VarCorr(model1, summary = FALSE)$ID$sd)^2
+v_animal <- (VarCorr(model1, summary = FALSE)$animal$sd)^2
+v_ID <- (VarCorr(model1, summary = FALSE)$ID$sd)^2
 v_Dam <- (VarCorr(model1, summary = FALSE)$Dam$sd)^2
 v_cohort <-  (VarCorr(model1, summary = FALSE)$cohort$sd)^2
 v_r <- (VarCorr(model1, summary = FALSE)$residual$sd)^2
 
-h2_hlg <- as.mcmc(v_animal[, "hlg12_Intercept"] / (v_animal[,"hlg12_Intercept"] + v_Dam[,"hlg12_Intercept"] + v_cohort[,"hlg12_Intercept"] +  v_r[,"hlg12"]))
-h2_mass <- as.mcmc(v_animal[, "wtd12_Intercept"] / (v_animal[, "wtd12_Intercept"] + v_Dam[, "wtd12_Intercept"] + v_cohort[, "wtd12_Intercept"] + v_r[, "wtd12"]))
+h2_hlg <- as.mcmc(v_animal[, "hlg_Intercept"] / (v_animal[,"hlg_Intercept"] +  v_ID[,"hlg_Intercept"] + v_Dam[,"hlg_Intercept"] + v_cohort[,"hlg_Intercept"] +  v_r[,"hlg"]))
+h2_mass <- as.mcmc(v_animal[, "wt_Intercept"] / (v_animal[, "wt_Intercept"] + v_ID[,"wt_Intercept"] + v_Dam[, "wt_Intercept"] + v_cohort[, "wt_Intercept"] + v_r[, "wt"]))
 
 plot(h2_hlg)
 plot(h2_mass)
@@ -500,6 +605,8 @@ plot(h2_mass)
 summary(h2_hlg)
 summary(h2_mass)
 
-cor_g <- as.mcmc((VarCorr(model1, summary = FALSE)$ID$cor[, 1, 2]))
+cor_g <- as.mcmc((VarCorr(model1, summary = FALSE)$animal$cor[, 1, 2]))
 
 plot(cor_g)
+
+summary(cor_g)
